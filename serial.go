@@ -8,7 +8,7 @@ compile for windows from another platform.  Unfortunately goinstall
 does not currently let you cross compile so you will have to do it
 manually:
 
- GOOS=windows make clean install
+	GOOS=windows make clean install
 
 Currently there is very little in the way of configurability.  You can
 set the baud rate.  Then you can Read(), Write(), or Close() the
@@ -26,37 +26,40 @@ different goroutines).
 
 Example usage:
 
-  package main
+	package main
 
-  import (
-        "github.com/tarm/serial"
-        "log"
-  )
+	import (
+	      "github.com/tarm/serial"
+	      "log"
+	)
 
-  func main() {
-        c := &serial.Config{Name: "COM5", Baud: 115200}
-        s, err := serial.OpenPort(c)
-        if err != nil {
-                log.Fatal(err)
-        }
+	func main() {
+	      c := &serial.Config{Name: "COM5", Baud: 115200}
+	      s, err := serial.OpenPort(c)
+	      if err != nil {
+	              log.Fatal(err)
+	      }
 
-        n, err := s.Write([]byte("test"))
-        if err != nil {
-                log.Fatal(err)
-        }
+	      n, err := s.Write([]byte("test"))
+	      if err != nil {
+	              log.Fatal(err)
+	      }
 
-        buf := make([]byte, 128)
-        n, err = s.Read(buf)
-        if err != nil {
-                log.Fatal(err)
-        }
-        log.Print("%q", buf[:n])
-  }
+	      buf := make([]byte, 128)
+	      n, err = s.Read(buf)
+	      if err != nil {
+	              log.Fatal(err)
+	      }
+	      log.Print("%q", buf[:n])
+	}
 */
 package serial
 
 import (
 	"errors"
+	"fmt"
+	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -87,13 +90,14 @@ const (
 //
 // For example:
 //
-//    c0 := &serial.Config{Name: "COM45", Baud: 115200, ReadTimeout: time.Millisecond * 500}
-// or
-//    c1 := new(serial.Config)
-//    c1.Name = "/dev/tty.usbserial"
-//    c1.Baud = 115200
-//    c1.ReadTimeout = time.Millisecond * 500
+//	c0 := &serial.Config{Name: "COM45", Baud: 115200, ReadTimeout: time.Millisecond * 500}
 //
+// or
+//
+//	c1 := new(serial.Config)
+//	c1.Name = "/dev/tty.usbserial"
+//	c1.Baud = 115200
+//	c1.ReadTimeout = time.Millisecond * 500
 type Config struct {
 	Name        string
 	Baud        int
@@ -160,6 +164,57 @@ func posixTimeoutValues(readTimeout time.Duration) (vmin uint8, vtime uint8) {
 		}
 	}
 	return minBytesToRead, uint8(readTimeoutInDeci)
+}
+
+// FindSerial tries to discover serial ports on your system
+func FindSerial(maxSize int, baud int) ([]string, error) {
+	var err error
+	var ports []string
+	var validated []string
+	var os = runtime.GOOS
+	switch os {
+	case "linux":
+		ports, err = filepath.Glob("/dev/tty[A-Za-z]*")
+		if err != nil {
+			return ports, nil
+		}
+		return checkPorts(ports, baud), nil
+	case "darwin":
+		ports, err = filepath.Glob("/dev/tty.*")
+		if err != nil {
+			return ports, nil
+		}
+		return checkPorts(ports, baud), nil
+	case "windows":
+		for i := 1; i < maxSize; i++ {
+			ports = append(ports, fmt.Sprintf("COM%v", i))
+		}
+		return checkPorts(ports, baud), nil
+	}
+
+	return validated, fmt.Errorf("FindSerial not implemented for %v", os)
+}
+
+// validate a specific serial port by setting it up
+func validate(port string, baud int) error {
+	cfg := &Config{Name: port, Baud: baud}
+	f, err := OpenPort(cfg)
+	if err != nil {
+		return err
+	}
+	f.Close()
+	return nil
+}
+
+// checkPorts validates multiple ports from a slice
+func checkPorts(ports []string, baud int) []string {
+	var validated []string
+	for _, p := range ports {
+		if err := validate(p, baud); err == nil {
+			validated = append(validated, p)
+		}
+	}
+	return validated
 }
 
 // func SendBreak()
